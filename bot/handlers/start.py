@@ -1,32 +1,34 @@
 # bot/handlers/start.py
 
 from pyrogram import filters
-from pyrogram.types import Message
+from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+
+from bot.services.users import get_or_create_user
 
 
 def register_start_handler(app, users_col):
 
     @app.on_message(filters.command("start") & filters.private)
-    async def start_handler(client, message: Message):
+    async def start_cmd(client, message):
         user = message.from_user
 
-        await users_col.update_one(
-            {"user_id": user.id},
-            {
-                "$setOnInsert": {
-                    "user_id": user.id,
-                    "username": user.username,
-                    "is_premium": False,
-                    "premium_expiry": None
-                }
-            },
-            upsert=True
+        await get_or_create_user(users_col, user)
+
+        buttons = InlineKeyboardMarkup(
+            [
+                [InlineKeyboardButton("📂 Upload File", callback_data="upload")],
+                [InlineKeyboardButton("💎 Premium", callback_data="premium")],
+                [InlineKeyboardButton("📊 Profile", callback_data="profile")],
+            ]
         )
 
         await message.reply_text(
-            f"👋 **Welcome {user.first_name}!**\n\n"
-            "📦 Ye advanced FileStore bot hai.\n\n"
-            "💎 Premium users ko **direct files** milti hain\n"
-            "🆓 Free users ko **shortener flow** se\n\n"
-            "Agar premium chahiye to /request bhejo 😎"
-      )
+            text=(
+                "🔥 **Welcome to FileFucker Bot**\n\n"
+                "📦 Upload your file\n"
+                "🔗 Generate secure download links\n"
+                "💎 Premium users get direct access\n\n"
+                "Start by sending me a file 😈"
+            ),
+            reply_markup=buttons
+        )
