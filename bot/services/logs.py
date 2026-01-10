@@ -9,9 +9,6 @@ def _now_utc() -> str:
 
 
 def hacker_block(title: str, body: str) -> str:
-    """
-    Returns a hacker-style formatted log block.
-    """
     return (
         f"🛑 {title}\n"
         f"━━━━━━━━━━━━━━━━━━\n"
@@ -22,15 +19,11 @@ def hacker_block(title: str, body: str) -> str:
 
 
 async def send_log(app, text: str):
-    """
-    Sends log text to private LOG_CHANNEL safely.
-    """
     if not Config.LOG_CHANNEL:
         return
     try:
         await app.send_message(Config.LOG_CHANNEL, text)
     except Exception:
-        # Silent fail: logging must never break the bot
         pass
 
 
