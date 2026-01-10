@@ -2,7 +2,6 @@
 
 import asyncio
 import logging
-from datetime import datetime
 
 from pyrogram import Client
 from pyrogram.idle import idle
@@ -47,7 +46,7 @@ app = Client(
     api_id=Config.API_ID,
     api_hash=Config.API_HASH,
     bot_token=Config.BOT_TOKEN,
-    workers=50,
+    workers=10,
     in_memory=True
 )
 
@@ -83,7 +82,7 @@ def register_all_handlers():
     register_request_handler(app, users_col)
 
 
-# ─── MAIN ENTRY ───────────────────────────────────────────────────────
+# ─── MAIN LOGIC ───────────────────────────────────────────────────────
 async def main():
     await app.start()
     register_all_handlers()
@@ -104,6 +103,8 @@ async def main():
     await idle()
 
 
-# ─── SAFE START (PYTHON 3.12+ FIX) ────────────────────────────────────
+# ─── SAFE BOOTSTRAP (CRITICAL FIX) ────────────────────────────────────
 if __name__ == "__main__":
-    asyncio.run(main())
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    loop.run_until_complete(main())
