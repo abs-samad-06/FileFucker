@@ -3,9 +3,7 @@
 import asyncio
 import logging
 
-from pyrogram import Client
-from pyrogram.idle import idle
-
+from pyrogram import Client, idle
 from motor.motor_asyncio import AsyncIOMotorClient
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
@@ -103,8 +101,6 @@ async def main():
     await idle()
 
 
-# ─── SAFE BOOTSTRAP (CRITICAL FIX) ────────────────────────────────────
+# ─── ENTRY POINT ──────────────────────────────────────────────────────
 if __name__ == "__main__":
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    loop.run_until_complete(main())
+    asyncio.run(main())
