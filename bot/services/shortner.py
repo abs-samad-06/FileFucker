@@ -1,4 +1,4 @@
-# bot/services/shortner.py
+# bot/services/shortener.py
 
 import secrets
 from datetime import datetime
@@ -20,7 +20,7 @@ def generate_token(length: int = 8) -> str:
     return secrets.token_urlsafe(length)[:length]
 
 
-# ─── CORE SHORTNER LOGIC ──────────────────────────────────────────────
+# ─── CORE SHORTENER LOGIC ─────────────────────────────────────────────
 async def create_link(
     db: AsyncIOMotorDatabase,
     *,
@@ -34,8 +34,14 @@ async def create_link(
     """
     token = generate_token()
 
+    # ensure uniqueness (very rare collision, but still)
+    while await db[COLLECTION_NAME].find_one({"token": token}):
+        token = generate_token()
+
     data = {
         "token": token,
+
+        # ownership
         "owner_id": owner_id,
         "file_id": file_id,
         "file_name": file_name,
@@ -45,7 +51,7 @@ async def create_link(
         "created_at": datetime.utcnow(),
         "clicks": 0,
 
-        # step tracking
+        # wait-step tracking
         "step_1": 0,
         "step_2": 0,
         "step_3": 0,
