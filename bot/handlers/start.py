@@ -2,45 +2,53 @@
 
 from pyrogram import filters
 from pyrogram.types import Message
-from datetime import datetime
+
+from bot.services.users import get_or_create_user, update_last_active
+from bot.services.logs import send_log, log_user_connected
 
 
 def register_start_handler(app, users_col):
 
     @app.on_message(filters.command("start") & filters.private)
     async def start_handler(client, message: Message):
+        parts = message.text.split()
         user = message.from_user
 
-        # Save user if not exists
-        await users_col.update_one(
-            {"user_id": user.id},
-            {
-                "$setOnInsert": {
-                    "user_id": user.id,
-                    "name": user.first_name,
-                    "username": user.username,
-                    "joined_at": datetime.utcnow(),
-                    "is_premium": False,
-                    "premium_expiry": None
-                }
-            },
-            upsert=True
-        )
+        # ─── DEEP LINK CASE ───────────────────────────────────────────
+        # Agar /start ke saath token hai, to yahan kuch nahi karega
+        # link.py usko handle karega
+        if len(parts) > 1:
+            return
+
+        # ─── NORMAL /start ───────────────────────────────────────────
+        user_db = await get_or_create_user(users_col, user)
+        await update_last_active(users_col, user.id)
+
+        # log only on first join
+        if user_db.get("joined_at"):
+            await send_log(
+                app,
+                log_user_connected(user.username, user.id)
+            )
 
         await message.reply_text(
-            f"""🔥 **Welcome {user.first_name}**
+            f"""
+🔥 **Welcome to FileFucker Bot**
 
-Main hoon **FileFucker Bot** 😎  
-Files upload karo → main **download link** bana dunga.
+👋 Hi {user.first_name or 'bro'}  
+Yahan files upload karo aur **secure download links** banao 😎
 
-📌 Commands:
-• `/start` – Bot start
-• File bhejo – Link milega
+💎 **Premium users** ko:
+• Direct file access  
+• No wait  
+• No ads  
 
-Premium loge to:
-⚡ Fast links  
-🚫 No limits  
+📌 **How to use**
+1️⃣ File bhejo  
+2️⃣ `/genlink` likho  
+3️⃣ Link share karo  
 
-Ab file daal BC 😈
-"""
+Ready ho? File daal BC 😈
+""",
+            disable_web_page_preview=True
         )
