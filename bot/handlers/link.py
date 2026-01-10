@@ -5,6 +5,7 @@ from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 from bot.services.premium import is_premium
 from bot.services.logs import send_log, log_link_step
+from bot.services.shortener import create_link
 
 
 def register_link_handler(app, db, users_col):
@@ -16,7 +17,7 @@ def register_link_handler(app, db, users_col):
 
         # ─── NORMAL /start (no payload) ────────────────────────────────
         if len(parts) == 1:
-            return  # start.py will handle normal /start
+            return  # start.py handles normal /start
 
         # ─── START WITH FILE UID ───────────────────────────────────────
         file_uid = parts[1]
@@ -32,28 +33,37 @@ def register_link_handler(app, db, users_col):
             )
             return
 
-        # ─── FREE USER → WAIT FLOW ────────────────────────────────────
+        # ─── FREE USER → SHORTENER + WAIT FLOW ────────────────────────
         if not is_premium(user_db):
+            link = await create_link(
+                db,
+                owner_id=user.id,
+                file_id=file["file_id"],
+                file_name=file.get("file_name", ""),
+                is_premium=False
+            )
+
             await send_log(
                 app,
                 log_link_step(
                     user.username,
                     user.id,
                     False,
-                    file_uid,
+                    link["token"],
                     file.get("file_name", ""),
-                    "FREE_USER_BLOCKED"
+                    "FREE_USER_LINK_CREATED"
                 )
             )
 
             await message.reply_text(
                 "🕒 **Free User Detected**\n\n"
                 "File ke liye thoda wait karna padega 😏\n"
-                "💎 Premium loge to direct milegi.",
+                "3 steps complete karne honge.\n\n"
+                "👇 Start from here:",
                 reply_markup=InlineKeyboardMarkup([[
                     InlineKeyboardButton(
                         "Continue",
-                        callback_data=f"wait|1|{file_uid}"
+                        callback_data=f"wait|1|{link['token']}"
                     )
                 ]])
             )
@@ -87,4 +97,4 @@ def register_link_handler(app, db, users_col):
             await message.reply_text(
                 "⚠️ File send nahi ho pa rahi.\n"
                 "Baad me try kar MC."
-                )
+        )
