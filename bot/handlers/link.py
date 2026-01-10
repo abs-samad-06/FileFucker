@@ -1,92 +1,44 @@
 # bot/handlers/link.py
 
 from pyrogram import filters
-from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
-
-from config import Config
-from bot.services.shortner import create_link
-from bot.services.logs import send_log, log_link_step
 
 
 def register_link_handler(app, db, users_col):
-    """
-    Registers /link command.
-    Usage:
-      - Reply to a FILE with /link
-    Behavior:
-      - Premium user -> direct file
-      - Free user    -> web short link (ad funnel)
-    """
+    files_col = db["files"]
 
-    @app.on_message(filters.command("link") & filters.private)
-    async def link_handler(client, message):
-        # Must reply to a file
-        if not message.reply_to_message or not message.reply_to_message.document:
-            return await message.reply_text(
-                "Reply to a file with /link to generate access."
-            )
+    @app.on_message(filters.command("start") & filters.private)
+    async def start_with_link(client, message):
+        parts = message.text.split()
 
-        user_id = message.from_user.id
-        user = await users_col.find_one({"user_id": user_id})
-        if not user:
-            return await message.reply_text("User not registered. Send /start first.")
+        # Normal /start (no payload)
+        if len(parts) == 1:
+            return
 
-        doc = message.reply_to_message.document
-        file_id = doc.file_id
-        file_name = doc.file_name or "file"
+        file_uid = parts[1]
 
-        # ─── PREMIUM USER: DIRECT FILE ────────────────────────────────
-        if user.get("is_premium"):
-            await client.send_document(
-                chat_id=user_id,
-                document=file_id,
-                caption="💎 **Premium Access**\nDirect file delivery enabled."
-            )
+        file = await files_col.find_one({"file_uid": file_uid})
 
-            # Log direct access
-            await send_log(
-                client,
-                log_link_step(
-                    username=message.from_user.username,
-                    user_id=user_id,
-                    is_premium=True,
-                    link_id="DIRECT",
-                    file_name=file_name,
-                    step="DIRECT DELIVERY"
-                )
+        if not file:
+            await message.reply_text(
+                "❌ Invalid ya expired link.\n"
+                "File nahi mili BC."
             )
             return
 
-        # ─── FREE USER: GENERATE SHORT LINK ───────────────────────────
-        link_data = await create_link(
-            db=db,
-            owner_id=user_id,
-            file_id=file_id,
-            file_name=file_name,
-            is_premium=False
+        # increase download count
+        await files_col.update_one(
+            {"file_uid": file_uid},
+            {"$inc": {"downloads": 1}}
         )
 
-        token = link_data["token"]
-        web_url = f"https://{Config.BOT_NAME}.herokuapp.com/l/{token}"
-
-        await message.reply_text(
-            "🧨 **Free Access Mode**\n\n"
-            "File protected by secure delivery.\n"
-            "Complete steps to unlock:",
-            reply_markup=InlineKeyboardMarkup(
-                [[InlineKeyboardButton("🔓 Unlock File", url=web_url)]]
+        try:
+            await app.send_cached_media(
+                chat_id=message.chat.id,
+                file_id=file["file_id"],
+                caption=f"📎 {file.get('file_name', '')}"
             )
-        )
-
-        # Log link creation
-        await send_log(
-            client,
-            log_link_step(
-                username=message.from_user.username,
-                user_id=user_id,
-                is_premium=False,
-                link_id=token,
-                file_name=file_name,
-                step="LINK GENERATED"
+        except Exception:
+            await message.reply_text(
+                "⚠️ File send nahi ho pa rahi.\n"
+                "Baad me try kar MC."
             )
-          )
