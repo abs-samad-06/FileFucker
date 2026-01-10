@@ -104,7 +104,7 @@ def register_wait_handler(app, db, users_col):
 
             await callback.message.edit_text(
                 "⏳ **Step 3 / 3**\n\n"
-                "Last step – 5 seconds bas 😈",
+                "Bas 5 seconds aur 😈",
                 reply_markup=InlineKeyboardMarkup([[
                     InlineKeyboardButton(
                         "Continue",
@@ -133,13 +133,13 @@ def register_wait_handler(app, db, users_col):
             await callback.answer("Almost done ⏳")
             await asyncio.sleep(5)
 
-            # increment file download
+            # increment file download count
             await files_col.update_one(
                 {"file_id": link["file_id"]},
                 {"$inc": {"downloads": 1}}
             )
 
-            # deactivate link after success (one-time use)
+            # one-time use: deactivate link
             await deactivate_link(db, token)
 
             try:
