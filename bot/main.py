@@ -6,12 +6,14 @@ from datetime import datetime
 
 from pyrogram import Client, filters
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+from pyrogram.errors import UserIsBlocked
 
 from config import Config, validate_config
 from motor.motor_asyncio import AsyncIOMotorClient
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 from bot.services.premium import calculate_expiry, is_expired
+from bot.services.security import ban_payload, unban_payload
 
 # ─── BASIC LOGGING ────────────────────────────────────────────────────
 logging.basicConfig(
@@ -26,7 +28,6 @@ validate_config()
 # ─── DATABASE ─────────────────────────────────────────────────────────
 mongo = AsyncIOMotorClient(Config.DATABASE_URL)
 db = mongo["filefucker"]
-
 users_col = db["users"]
 
 # ─── BOT CLIENT ───────────────────────────────────────────────────────
@@ -41,7 +42,6 @@ app = Client(
 
 # ─── SCHEDULER ────────────────────────────────────────────────────────
 scheduler = AsyncIOScheduler()
-
 
 # ─── HELPERS ──────────────────────────────────────────────────────────
 def is_admin(user_id: int) -> bool:
@@ -62,8 +62,21 @@ async def add_user(user_id: int, username: str | None):
             "premium_expiry": None,
             "language": Config.DEFAULT_LANGUAGE,
             "banned": False,
+            "ban_reason": None,
+            "banned_at": None,
             "joined_at": datetime.utcnow()
         })
+
+
+async def ensure_not_banned(message):
+    user = await get_user(message.from_user.id)
+    if user and user.get("banned"):
+        await message.reply_text(
+            "⛔ **ACCESS DENIED**\n\n"
+            "Your access has been restricted.\n"
+            f"Reason: `{user.get('ban_reason')}`"
+        )
+        raise UserIsBlocked
 
 
 async def send_log(text: str):
@@ -82,7 +95,6 @@ def hacker_log(title: str, body: str) -> str:
 ━━━━━━━━━━━━━━━━━━
 """
 
-
 # ─── PREMIUM EXPIRY CHECK ──────────────────────────────────────────────
 async def check_premium_expiry():
     async for user in users_col.find({"is_premium": True}):
@@ -96,56 +108,60 @@ async def check_premium_expiry():
                 await app.send_message(
                     user["user_id"],
                     "😬 Bhai tera **Premium expire ho gaya**.\n\n"
-                    "Ab free mode active hai.\n"
+                    "Free mode active hai.\n"
                     "Dobara premium lega to seedha files milengi 😎"
                 )
             except:
                 pass
 
-            log_text = hacker_log(
-                "ACCESS REVOKED",
-                f"👤 User: {user.get('username')}\n"
-                f"🆔 ID: {user['user_id']}\n"
-                f"⚠️ Reason: PREMIUM EXPIRED"
+            await send_log(
+                hacker_log(
+                    "ACCESS REVOKED",
+                    f"👤 User: @{user.get('username')}\n"
+                    f"🆔 ID: {user['user_id']}\n"
+                    f"⚠️ Reason: PREMIUM EXPIRED"
+                )
             )
-            await send_log(log_text)
-
 
 # ─── START ────────────────────────────────────────────────────────────
 @app.on_message(filters.command("start") & filters.private)
 async def start_handler(_, message):
-    user = message.from_user
-    await add_user(user.id, user.username)
+    await add_user(message.from_user.id, message.from_user.username)
+    await ensure_not_banned(message)
 
     await message.reply_text(
         "👋 **Welcome to FileFucker**\n\n"
         "💎 Premium = Direct files\n"
         "🧨 Free = Secure delivery layers\n\n"
-        "Use /profile to check status."
+        "Use /profile to check status.",
+        reply_markup=InlineKeyboardMarkup(
+            [[InlineKeyboardButton("👤 My Profile", callback_data="profile")]]
+        )
     )
 
     await send_log(
         hacker_log(
             "NEW USER CONNECTED",
-            f"👤 User: @{user.username}\n🆔 ID: {user.id}\n⚠️ Access: FREE"
+            f"👤 User: @{message.from_user.username}\n"
+            f"🆔 ID: {message.from_user.id}\n"
+            f"⚠️ Access: FREE"
         )
     )
-
 
 # ─── PROFILE ──────────────────────────────────────────────────────────
 @app.on_message(filters.command("profile") & filters.private)
 async def profile_handler(_, message):
+    await ensure_not_banned(message)
     user = await get_user(message.from_user.id)
 
     text = (
         "👤 **Your Profile**\n\n"
         f"🆔 ID: `{user['user_id']}`\n"
         f"💎 Premium: {'YES' if user['is_premium'] else 'NO'}\n"
-        f"⏳ Expiry: {user['premium_expiry'] or 'N/A'}"
+        f"⏳ Expiry: {user['premium_expiry'] or 'N/A'}\n"
+        f"🚫 Banned: {'YES' if user['banned'] else 'NO'}"
     )
-
     await message.reply_text(text)
-
 
 # ─── ADMIN: ADD PREMIUM ───────────────────────────────────────────────
 @app.on_message(filters.command("addpremium") & filters.private)
@@ -159,20 +175,16 @@ async def add_premium(_, message):
 
     user_id = int(parts[1])
     plan = parts[2]
-
     if plan not in Config.PREMIUM_PLANS:
         return await message.reply_text("Invalid plan")
 
-    days = Config.PREMIUM_PLANS[plan]["days"]
-    expiry = calculate_expiry(days)
-
+    expiry = calculate_expiry(Config.PREMIUM_PLANS[plan]["days"])
     await users_col.update_one(
         {"user_id": user_id},
         {"$set": {"is_premium": True, "premium_expiry": expiry}}
     )
 
     await message.reply_text("✅ Premium activated")
-
     await send_log(
         hacker_log(
             "PRIVILEGED ACCESS GRANTED",
@@ -182,11 +194,65 @@ async def add_premium(_, message):
         )
     )
 
+# ─── ADMIN: BAN ───────────────────────────────────────────────────────
+@app.on_message(filters.command("ban") & filters.private)
+async def ban_user(_, message):
+    if not is_admin(message.from_user.id):
+        return
+
+    parts = message.text.split(maxsplit=2)
+    if len(parts) < 2:
+        return await message.reply_text("Usage: /ban user_id [reason]")
+
+    user_id = int(parts[1])
+    reason = parts[2] if len(parts) == 3 else "Policy violation"
+
+    await users_col.update_one(
+        {"user_id": user_id},
+        {"$set": ban_payload(reason)}
+    )
+
+    await message.reply_text("⛔ User banned")
+    await send_log(
+        hacker_log(
+            "SECURITY FLAG RAISED",
+            f"👑 Admin: {message.from_user.id}\n"
+            f"👤 Target: {user_id}\n"
+            f"🚫 Action: BAN\n"
+            f"📝 Reason: {reason}"
+        )
+    )
+
+# ─── ADMIN: UNBAN ─────────────────────────────────────────────────────
+@app.on_message(filters.command("unban") & filters.private)
+async def unban_user(_, message):
+    if not is_admin(message.from_user.id):
+        return
+
+    parts = message.text.split()
+    if len(parts) != 2:
+        return await message.reply_text("Usage: /unban user_id")
+
+    user_id = int(parts[1])
+
+    await users_col.update_one(
+        {"user_id": user_id},
+        {"$set": unban_payload()}
+    )
+
+    await message.reply_text("✅ User unbanned")
+    await send_log(
+        hacker_log(
+            "ACCESS RESTORED",
+            f"👑 Admin: {message.from_user.id}\n"
+            f"👤 Target: {user_id}\n"
+            f"✅ Action: UNBAN"
+        )
+    )
 
 # ─── BOT STARTUP ──────────────────────────────────────────────────────
 async def main():
     await app.start()
-
     scheduler.add_job(check_premium_expiry, "interval", hours=24)
     scheduler.start()
 
@@ -196,6 +262,7 @@ async def main():
             "SYSTEM ONLINE",
             f"🤖 Bot: @{me.username}\n"
             f"🚀 Version: {Config.VERSION}\n"
+            f"🛡 Security: ACTIVE\n"
             f"🧠 Premium Watchdog: ACTIVE"
         )
     )
