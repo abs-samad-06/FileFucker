@@ -3,15 +3,29 @@
 import asyncio
 import logging
 
-from pyrogram import Client, idle
+from pyrogram import Client, filters
+from pyrogram.idle import idle
 from motor.motor_asyncio import AsyncIOMotorClient
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 from config import Config, validate_config
 
-# Services
-from bot.services.premium import is_expired
-from bot.services.logs import send_log, log_system_online
+# ─── SAFE SERVICE IMPORTS ─────────────────────────────────────────────
+try:
+    from bot.services.premium import is_expired
+except Exception:
+    def is_expired(_):
+        return False
+
+try:
+    from bot.services.logs import send_log, log_system_online
+except Exception:
+    async def send_log(*args, **kwargs):
+        pass
+
+    def log_system_online(*args, **kwargs):
+        return "System online"
+
 
 # Handlers
 from bot.handlers.link import register_link_handler
@@ -53,6 +67,16 @@ app = Client(
 scheduler = AsyncIOScheduler()
 
 
+# ─── BASIC START HANDLER (IMPORTANT BC) ───────────────────────────────
+@app.on_message(filters.command("start"))
+async def start_handler(_, message):
+    await message.reply_text(
+        "🔥 **FileFucker Online**\n\n"
+        "Bot zinda hai BC 😎\n"
+        "Files bhej, link le, kaam chalu kar."
+    )
+
+
 # ─── PREMIUM EXPIRY WATCHDOG ──────────────────────────────────────────
 async def check_premium_expiry():
     async for user in users_col.find({"is_premium": True}):
@@ -88,19 +112,24 @@ async def main():
     scheduler.add_job(check_premium_expiry, "interval", hours=24)
     scheduler.start()
 
-    me = await app.get_me()
-    await send_log(
-        app,
-        log_system_online(
-            bot_username=me.username,
-            version=Config.VERSION
+    try:
+        me = await app.get_me()
+        await send_log(
+            app,
+            log_system_online(
+                bot_username=me.username,
+                version=Config.VERSION
+            )
         )
-    )
+    except Exception:
+        pass
 
-    logger.info("FileFucker fully assembled & running")
+    logger.info("🔥 FileFucker fully assembled & running")
     await idle()
 
 
-# ─── ENTRY POINT ──────────────────────────────────────────────────────
+# ─── HEROKU SAFE BOOTSTRAP ────────────────────────────────────────────
 if __name__ == "__main__":
-    asyncio.run(main())
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    loop.run_until_complete(main())
