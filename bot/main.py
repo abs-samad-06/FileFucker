@@ -9,6 +9,9 @@ from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 from config import Config, validate_config
 from motor.motor_asyncio import AsyncIOMotorClient
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
+
+from bot.services.premium import calculate_expiry, is_expired
 
 # ─── BASIC LOGGING ────────────────────────────────────────────────────
 logging.basicConfig(
@@ -25,7 +28,6 @@ mongo = AsyncIOMotorClient(Config.DATABASE_URL)
 db = mongo["filefucker"]
 
 users_col = db["users"]
-admins_col = db["admins"]
 
 # ─── BOT CLIENT ───────────────────────────────────────────────────────
 app = Client(
@@ -36,6 +38,10 @@ app = Client(
     workers=50,
     in_memory=True
 )
+
+# ─── SCHEDULER ────────────────────────────────────────────────────────
+scheduler = AsyncIOScheduler()
+
 
 # ─── HELPERS ──────────────────────────────────────────────────────────
 def is_admin(user_id: int) -> bool:
@@ -77,33 +83,53 @@ def hacker_log(title: str, body: str) -> str:
 """
 
 
-# ─── START EVENT ──────────────────────────────────────────────────────
+# ─── PREMIUM EXPIRY CHECK ──────────────────────────────────────────────
+async def check_premium_expiry():
+    async for user in users_col.find({"is_premium": True}):
+        if is_expired(user.get("premium_expiry")):
+            await users_col.update_one(
+                {"user_id": user["user_id"]},
+                {"$set": {"is_premium": False, "premium_expiry": None}}
+            )
+
+            try:
+                await app.send_message(
+                    user["user_id"],
+                    "😬 Bhai tera **Premium expire ho gaya**.\n\n"
+                    "Ab free mode active hai.\n"
+                    "Dobara premium lega to seedha files milengi 😎"
+                )
+            except:
+                pass
+
+            log_text = hacker_log(
+                "ACCESS REVOKED",
+                f"👤 User: {user.get('username')}\n"
+                f"🆔 ID: {user['user_id']}\n"
+                f"⚠️ Reason: PREMIUM EXPIRED"
+            )
+            await send_log(log_text)
+
+
+# ─── START ────────────────────────────────────────────────────────────
 @app.on_message(filters.command("start") & filters.private)
 async def start_handler(_, message):
     user = message.from_user
     await add_user(user.id, user.username)
 
-    text = (
+    await message.reply_text(
         "👋 **Welcome to FileFucker**\n\n"
-        "This is a controlled-access file system.\n\n"
-        "💎 Premium users get **direct files**.\n"
-        "🧨 Free users go through **secured delivery layers**.\n\n"
-        "Use /profile to check your status.\n"
-        "Use /language to change language."
+        "💎 Premium = Direct files\n"
+        "🧨 Free = Secure delivery layers\n\n"
+        "Use /profile to check status."
     )
 
-    await message.reply_text(
-        text,
-        reply_markup=InlineKeyboardMarkup(
-            [[InlineKeyboardButton("👤 My Profile", callback_data="profile")]]
+    await send_log(
+        hacker_log(
+            "NEW USER CONNECTED",
+            f"👤 User: @{user.username}\n🆔 ID: {user.id}\n⚠️ Access: FREE"
         )
     )
-
-    log_text = hacker_log(
-        "NEW USER CONNECTED",
-        f"👤 User: @{user.username}\n🆔 ID: {user.id}\n⚠️ Access Level: FREE"
-    )
-    await send_log(log_text)
 
 
 # ─── PROFILE ──────────────────────────────────────────────────────────
@@ -111,42 +137,14 @@ async def start_handler(_, message):
 async def profile_handler(_, message):
     user = await get_user(message.from_user.id)
 
-    premium_status = "✅ YES" if user["is_premium"] else "❌ NO"
-    expiry = user["premium_expiry"] or "N/A"
-
     text = (
         "👤 **Your Profile**\n\n"
         f"🆔 ID: `{user['user_id']}`\n"
-        f"💎 Premium: {premium_status}\n"
-        f"⏳ Expiry: {expiry}\n"
-        f"🌐 Language: {user['language']}"
+        f"💎 Premium: {'YES' if user['is_premium'] else 'NO'}\n"
+        f"⏳ Expiry: {user['premium_expiry'] or 'N/A'}"
     )
 
     await message.reply_text(text)
-
-
-# ─── LANGUAGE ─────────────────────────────────────────────────────────
-@app.on_message(filters.command("language") & filters.private)
-async def language_handler(_, message):
-    await message.reply_text(
-        "🌐 Choose your language:",
-        reply_markup=InlineKeyboardMarkup([
-            [
-                InlineKeyboardButton("🇬🇧 English", callback_data="lang_en"),
-                InlineKeyboardButton("🇮🇳 Hinglish", callback_data="lang_hi")
-            ]
-        ])
-    )
-
-
-@app.on_callback_query(filters.regex("^lang_"))
-async def set_language(_, query):
-    lang = query.data.split("_")[1]
-    await users_col.update_one(
-        {"user_id": query.from_user.id},
-        {"$set": {"language": lang}}
-    )
-    await query.answer("Language updated ✅", show_alert=True)
 
 
 # ─── ADMIN: ADD PREMIUM ───────────────────────────────────────────────
@@ -166,41 +164,43 @@ async def add_premium(_, message):
         return await message.reply_text("Invalid plan")
 
     days = Config.PREMIUM_PLANS[plan]["days"]
-    expiry = datetime.utcnow().date().isoformat()
+    expiry = calculate_expiry(days)
 
     await users_col.update_one(
         {"user_id": user_id},
-        {"$set": {
-            "is_premium": True,
-            "premium_expiry": expiry
-        }}
+        {"$set": {"is_premium": True, "premium_expiry": expiry}}
     )
 
     await message.reply_text("✅ Premium activated")
 
-    log_text = hacker_log(
-        "PRIVILEGED ACCESS GRANTED",
-        f"👑 Admin: {message.from_user.id}\n"
-        f"👤 Target User: {user_id}\n"
-        f"⏳ Duration: {days} days"
+    await send_log(
+        hacker_log(
+            "PRIVILEGED ACCESS GRANTED",
+            f"👑 Admin: {message.from_user.id}\n"
+            f"👤 Target: {user_id}\n"
+            f"⏳ Expiry: {expiry}"
+        )
     )
-    await send_log(log_text)
 
 
 # ─── BOT STARTUP ──────────────────────────────────────────────────────
 async def main():
     await app.start()
+
+    scheduler.add_job(check_premium_expiry, "interval", hours=24)
+    scheduler.start()
+
     me = await app.get_me()
-
-    start_log = hacker_log(
-        "SYSTEM ONLINE",
-        f"🤖 Bot: @{me.username}\n"
-        f"🚀 Version: {Config.VERSION}\n"
-        f"🧠 Mode: MONITORING ACTIVE"
+    await send_log(
+        hacker_log(
+            "SYSTEM ONLINE",
+            f"🤖 Bot: @{me.username}\n"
+            f"🚀 Version: {Config.VERSION}\n"
+            f"🧠 Premium Watchdog: ACTIVE"
+        )
     )
-    await send_log(start_log)
 
-    logger.info("FileFucker bot started")
+    logger.info("Bot started")
     await idle()
 
 
