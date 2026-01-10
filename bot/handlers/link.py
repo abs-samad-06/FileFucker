@@ -52,4 +52,50 @@ def register_link_handler(app, db, users_col):
             await send_log(
                 app,
                 log_link_step(
-                    user.username
+                    user.username,
+                    user.id,
+                    True,
+                    token,
+                    file.get("file_name", ""),
+                    "PREMIUM_DIRECT_DELIVERY"
+                )
+            )
+
+            try:
+                await app.send_cached_media(
+                    chat_id=message.chat.id,
+                    file_id=file["file_id"],
+                    caption=f"📎 {file.get('file_name', '')}"
+                )
+            except Exception:
+                await message.reply_text(
+                    "⚠️ File send nahi ho pa rahi.\n"
+                    "Baad me try kar MC."
+                )
+            return
+
+        # ─── FREE USER → WAIT FLOW ENTRY ──────────────────────────────
+        await send_log(
+            app,
+            log_link_step(
+                user.username,
+                user.id,
+                False,
+                token,
+                file.get("file_name", ""),
+                "FREE_USER_WAIT_ENTRY"
+            )
+        )
+
+        await message.reply_text(
+            "🕒 **Free User Access**\n\n"
+            "Is file ke liye thoda rukna padega 😏\n"
+            "3 steps complete karne honge.\n\n"
+            "👇 Continue karo:",
+            reply_markup=InlineKeyboardMarkup([[
+                InlineKeyboardButton(
+                    "Continue",
+                    callback_data=f"wait|1|{token}"
+                )
+            ]])
+        )
