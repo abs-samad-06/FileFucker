@@ -4,7 +4,7 @@ import asyncio
 import logging
 
 from pyrogram import Client, filters
-from pyrogram.idle import idle
+from pyrogram import idle
 from motor.motor_asyncio import AsyncIOMotorClient
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
