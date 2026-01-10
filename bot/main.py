@@ -14,6 +14,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 from bot.services.premium import calculate_expiry, is_expired
 from bot.services.security import ban_payload, unban_payload
+from bot.services.broadcast import send_in_batches
 
 # ─── BASIC LOGGING ────────────────────────────────────────────────────
 logging.basicConfig(
@@ -22,7 +23,6 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# ─── VALIDATE CONFIG ──────────────────────────────────────────────────
 validate_config()
 
 # ─── DATABASE ─────────────────────────────────────────────────────────
@@ -40,7 +40,6 @@ app = Client(
     in_memory=True
 )
 
-# ─── SCHEDULER ────────────────────────────────────────────────────────
 scheduler = AsyncIOScheduler()
 
 # ─── HELPERS ──────────────────────────────────────────────────────────
@@ -53,8 +52,7 @@ async def get_user(user_id: int):
 
 
 async def add_user(user_id: int, username: str | None):
-    user = await get_user(user_id)
-    if not user:
+    if not await get_user(user_id):
         await users_col.insert_one({
             "user_id": user_id,
             "username": username,
@@ -73,7 +71,6 @@ async def ensure_not_banned(message):
     if user and user.get("banned"):
         await message.reply_text(
             "⛔ **ACCESS DENIED**\n\n"
-            "Your access has been restricted.\n"
             f"Reason: `{user.get('ban_reason')}`"
         )
         raise UserIsBlocked
@@ -95,6 +92,7 @@ def hacker_log(title: str, body: str) -> str:
 ━━━━━━━━━━━━━━━━━━
 """
 
+
 # ─── PREMIUM EXPIRY CHECK ──────────────────────────────────────────────
 async def check_premium_expiry():
     async for user in users_col.find({"is_premium": True}):
@@ -103,13 +101,10 @@ async def check_premium_expiry():
                 {"user_id": user["user_id"]},
                 {"$set": {"is_premium": False, "premium_expiry": None}}
             )
-
             try:
                 await app.send_message(
                     user["user_id"],
-                    "😬 Bhai tera **Premium expire ho gaya**.\n\n"
-                    "Free mode active hai.\n"
-                    "Dobara premium lega to seedha files milengi 😎"
+                    "😬 Premium expire ho gaya. Free mode active."
                 )
             except:
                 pass
@@ -122,6 +117,7 @@ async def check_premium_expiry():
                     f"⚠️ Reason: PREMIUM EXPIRED"
                 )
             )
+
 
 # ─── START ────────────────────────────────────────────────────────────
 @app.on_message(filters.command("start") & filters.private)
@@ -148,20 +144,21 @@ async def start_handler(_, message):
         )
     )
 
+
 # ─── PROFILE ──────────────────────────────────────────────────────────
 @app.on_message(filters.command("profile") & filters.private)
 async def profile_handler(_, message):
     await ensure_not_banned(message)
     user = await get_user(message.from_user.id)
 
-    text = (
+    await message.reply_text(
         "👤 **Your Profile**\n\n"
         f"🆔 ID: `{user['user_id']}`\n"
         f"💎 Premium: {'YES' if user['is_premium'] else 'NO'}\n"
         f"⏳ Expiry: {user['premium_expiry'] or 'N/A'}\n"
         f"🚫 Banned: {'YES' if user['banned'] else 'NO'}"
     )
-    await message.reply_text(text)
+
 
 # ─── ADMIN: ADD PREMIUM ───────────────────────────────────────────────
 @app.on_message(filters.command("addpremium") & filters.private)
@@ -194,7 +191,8 @@ async def add_premium(_, message):
         )
     )
 
-# ─── ADMIN: BAN ───────────────────────────────────────────────────────
+
+# ─── ADMIN: BAN / UNBAN ───────────────────────────────────────────────
 @app.on_message(filters.command("ban") & filters.private)
 async def ban_user(_, message):
     if not is_admin(message.from_user.id):
@@ -207,11 +205,7 @@ async def ban_user(_, message):
     user_id = int(parts[1])
     reason = parts[2] if len(parts) == 3 else "Policy violation"
 
-    await users_col.update_one(
-        {"user_id": user_id},
-        {"$set": ban_payload(reason)}
-    )
-
+    await users_col.update_one({"user_id": user_id}, {"$set": ban_payload(reason)})
     await message.reply_text("⛔ User banned")
     await send_log(
         hacker_log(
@@ -223,7 +217,7 @@ async def ban_user(_, message):
         )
     )
 
-# ─── ADMIN: UNBAN ─────────────────────────────────────────────────────
+
 @app.on_message(filters.command("unban") & filters.private)
 async def unban_user(_, message):
     if not is_admin(message.from_user.id):
@@ -234,12 +228,7 @@ async def unban_user(_, message):
         return await message.reply_text("Usage: /unban user_id")
 
     user_id = int(parts[1])
-
-    await users_col.update_one(
-        {"user_id": user_id},
-        {"$set": unban_payload()}
-    )
-
+    await users_col.update_one({"user_id": user_id}, {"$set": unban_payload()})
     await message.reply_text("✅ User unbanned")
     await send_log(
         hacker_log(
@@ -249,6 +238,66 @@ async def unban_user(_, message):
             f"✅ Action: UNBAN"
         )
     )
+
+
+# ─── ADMIN: BROADCASTS ────────────────────────────────────────────────
+@app.on_message(filters.command("broadcast") & filters.private)
+async def broadcast(_, message):
+    if not is_admin(message.from_user.id):
+        return
+
+    if not message.reply_to_message:
+        return await message.reply_text("Reply to a message to broadcast.")
+
+    users = await users_col.find({"banned": False}).to_list(length=None)
+    user_ids = [u["user_id"] for u in users]
+
+    stats = await send_in_batches(app, user_ids, message.reply_to_message.text)
+
+    await message.reply_text(
+        f"📣 Broadcast done\n\n✅ Sent: {stats['sent']}\n❌ Failed: {stats['failed']}"
+    )
+    await send_log(
+        hacker_log(
+            "MASS TRANSMISSION",
+            f"📣 Type: ALL USERS\n"
+            f"📦 Sent: {stats['sent']}\n"
+            f"❌ Failed: {stats['failed']}"
+        )
+    )
+
+
+@app.on_message(filters.command("pbroadcast") & filters.private)
+async def pbroadcast(_, message):
+    if not is_admin(message.from_user.id):
+        return
+
+    if not message.reply_to_message:
+        return await message.reply_text("Reply to a message to pbroadcast.")
+
+    users = await users_col.find({"is_premium": True, "banned": False}).to_list(length=None)
+    user_ids = [u["user_id"] for u in users]
+
+    stats = await send_in_batches(app, user_ids, message.reply_to_message.text)
+
+    await message.reply_text(
+        f"💎 Premium broadcast done\n\n✅ Sent: {stats['sent']}\n❌ Failed: {stats['failed']}"
+    )
+    await send_log(
+        hacker_log(
+            "TARGETED TRANSMISSION",
+            f"🎯 Type: PREMIUM USERS\n"
+            f"📦 Sent: {stats['sent']}\n"
+            f"❌ Failed: {stats['failed']}"
+        )
+    )
+
+
+@app.on_message(filters.command("batch") & filters.private)
+async def batch(_, message):
+    # Alias to broadcast (kept for compatibility)
+    return await broadcast(_, message)
+
 
 # ─── BOT STARTUP ──────────────────────────────────────────────────────
 async def main():
@@ -263,7 +312,8 @@ async def main():
             f"🤖 Bot: @{me.username}\n"
             f"🚀 Version: {Config.VERSION}\n"
             f"🛡 Security: ACTIVE\n"
-            f"🧠 Premium Watchdog: ACTIVE"
+            f"🧠 Premium Watchdog: ACTIVE\n"
+            f"📣 Broadcast Engine: READY"
         )
     )
 
