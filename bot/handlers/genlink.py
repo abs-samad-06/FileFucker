@@ -1,41 +1,57 @@
 # bot/handlers/genlink.py
 
 from pyrogram import filters
+from pyrogram.types import Message
+
+from bot.services.shortener import create_link
+from bot.services.premium import is_premium
+from bot.services.users import update_last_active
 
 
 def register_genlink_handler(app, db, users_col):
     files_col = db["files"]
 
-    @app.on_message(filters.private & filters.command("genlink"))
-    async def genlink_handler(client, message):
-        user_id = message.from_user.id
+    @app.on_message(filters.command("genlink") & filters.private)
+    async def genlink_handler(client, message: Message):
+        user = message.from_user
+        await update_last_active(users_col, user.id)
 
-        # last file uploaded by this user
+        # last uploaded file by user
         file = await files_col.find_one(
-            {"uploaded_by": user_id},
+            {"uploaded_by": user.id},
             sort=[("uploaded_at", -1)]
         )
 
         if not file:
             await message.reply_text(
-                "❌ Koi file nahi mili BC.\n"
-                "Pehle file bhej fir /genlink chala 😑"
+                "❌ Koi file nahi mili.\n"
+                "Pehle file bhej MC 😑"
             )
             return
 
-        file_uid = file["file_uid"]
+        user_db = await users_col.find_one({"user_id": user.id})
+        premium = is_premium(user_db)
 
-        # simple link (abhi direct)
-        link = f"https://t.me/{(await app.get_me()).username}?start={file_uid}"
+        # create shortener link entry
+        link = await create_link(
+            db,
+            owner_id=user.id,
+            file_id=file["file_id"],
+            file_name=file.get("file_name", ""),
+            is_premium=premium
+        )
+
+        bot = await app.get_me()
+        share_link = f"https://t.me/{bot.username}?start={link['token']}"
 
         await message.reply_text(
-            text=(
-                "🔗 **File link generated**\n\n"
-                f"📎 `{file.get('file_name', 'unknown')}`\n"
-                f"🆔 `{file_uid}`\n\n"
-                f"👉 **Link:**\n{link}\n\n"
-                "😈 Premium hai to direct milega,\n"
-                "Free hai to thoda nachayenge."
-            ),
+            f"""🔗 **Link Generated**
+
+📎 File: `{file.get('file_name')}`
+💎 Premium: `{'YES' if premium else 'NO'}`
+
+👉 Share this link:
+{share_link}
+""",
             disable_web_page_preview=True
-      )
+        )
