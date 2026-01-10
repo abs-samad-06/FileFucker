@@ -1,28 +1,24 @@
 # bot/services/premium.py
 
 from datetime import datetime, timedelta
-from typing import Optional
 
 
-def calculate_expiry(days: int) -> datetime:
-    """
-    Calculate premium expiry datetime.
-    """
+def calculate_expiry(days: int):
     return datetime.utcnow() + timedelta(days=days)
 
 
-def is_expired(expiry: Optional[datetime]) -> bool:
-    """
-    Check whether premium is expired.
-    """
-    if not expiry:
-        return True
+def is_premium(user: dict) -> bool:
+    if not user:
+        return False
 
-    # expiry can be string if stored badly, handle safely
+    expiry = user.get("premium_expiry")
+    if not expiry:
+        return False
+
     if isinstance(expiry, str):
         try:
             expiry = datetime.fromisoformat(expiry)
         except Exception:
-            return True
+            return False
 
-    return datetime.utcnow() > expiry
+    return datetime.utcnow() < expiry
