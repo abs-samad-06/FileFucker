@@ -14,9 +14,12 @@ from bot.handlers.start import register_start_handler
 from bot.handlers.file import register_file_handler
 from bot.handlers.genlink import register_genlink_handler
 from bot.handlers.link import register_link_handler
-from bot.handlers.users import register_user_list_handlers
+from bot.handlers.wait import register_wait_handler
 from bot.handlers.request import register_request_handler
 from bot.handlers.stats import register_stats_handlers
+from bot.handlers.premium import register_premium_handlers
+from bot.handlers.profile import register_profile_handler
+from bot.handlers.language import register_language_handler
 
 # ─── SERVICES ─────────────────────────────────────────────────────────
 from bot.services.premium import is_expired
@@ -31,7 +34,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-# ─── CONFIG CHECK ─────────────────────────────────────────────────────
+# ─── CONFIG VALIDATION ────────────────────────────────────────────────
 validate_config()
 
 
@@ -47,7 +50,7 @@ app = Client(
     api_id=Config.API_ID,
     api_hash=Config.API_HASH,
     bot_token=Config.BOT_TOKEN,
-    workers=10,
+    workers=20,
     in_memory=True
 )
 
@@ -56,7 +59,7 @@ app = Client(
 scheduler = AsyncIOScheduler()
 
 
-# ─── PREMIUM EXPIRY CHECK ─────────────────────────────────────────────
+# ─── PREMIUM EXPIRY WATCHDOG ──────────────────────────────────────────
 async def check_premium_expiry():
     async for user in users_col.find({"is_premium": True}):
         if is_expired(user.get("premium_expiry")):
@@ -67,7 +70,9 @@ async def check_premium_expiry():
             try:
                 await app.send_message(
                     user["user_id"],
-                    "⏰ Your premium has expired.\nFree mode activated."
+                    "⏰ **Premium Expired**\n\n"
+                    "Free mode active ho gaya hai.\n"
+                    "Dobara premium lega to direct files milengi 😎"
                 )
             except Exception:
                 pass
@@ -75,15 +80,21 @@ async def check_premium_expiry():
 
 # ─── REGISTER ALL HANDLERS ────────────────────────────────────────────
 def register_all_handlers():
+    # core user flow
     register_start_handler(app, users_col)
     register_file_handler(app, db, users_col)
     register_genlink_handler(app, db, users_col)
     register_link_handler(app, db, users_col)
+    register_wait_handler(app, db, users_col)
 
-    # admin / misc
-    register_user_list_handlers(app, users_col)
+    # user utilities
+    register_profile_handler(app, users_col)
+    register_language_handler(app, users_col)
     register_request_handler(app, users_col)
+
+    # admin / analytics
     register_stats_handlers(app, db, users_col)
+    register_premium_handlers(app, users_col)
 
 
 # ─── MAIN ─────────────────────────────────────────────────────────────
@@ -104,10 +115,10 @@ async def main():
         )
     )
 
-    logger.info("🔥 FileFucker fully started & ready")
+    logger.info("🔥 FileFucker fully started & production ready")
     await idle()
 
 
-# ─── ENTRY POINT (HEROKU SAFE) ────────────────────────────────────────
+# ─── ENTRY POINT (HEROKU / VPS SAFE) ───────────────────────────────────
 if __name__ == "__main__":
     asyncio.run(main())
