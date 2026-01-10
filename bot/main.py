@@ -5,21 +5,23 @@ import logging
 from datetime import datetime
 
 from pyrogram import Client
+from pyrogram.idle import idle
+
 from motor.motor_asyncio import AsyncIOMotorClient
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 from config import Config, validate_config
 
 # Services
-from bot.services.premium import calculate_expiry, is_expired
+from bot.services.premium import is_expired
 from bot.services.logs import send_log, log_system_online
-from bot.services.security import ban_payload, unban_payload
 
-# Handlers (register functions)
+# Handlers
 from bot.handlers.link import register_link_handler
 from bot.handlers.stats import register_stats_handlers
 from bot.handlers.users import register_user_list_handlers
 from bot.handlers.request import register_request_handler
+
 
 # ─── LOGGING ───────────────────────────────────────────────────────────
 logging.basicConfig(
@@ -28,15 +30,18 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+
 # ─── CONFIG CHECK ─────────────────────────────────────────────────────
 validate_config()
 
-# ─── DB ───────────────────────────────────────────────────────────────
+
+# ─── DATABASE ─────────────────────────────────────────────────────────
 mongo = AsyncIOMotorClient(Config.DATABASE_URL)
 db = mongo["filefucker"]
 users_col = db["users"]
 
-# ─── BOT ──────────────────────────────────────────────────────────────
+
+# ─── BOT CLIENT ───────────────────────────────────────────────────────
 app = Client(
     name="FileFucker",
     api_id=Config.API_ID,
@@ -45,6 +50,7 @@ app = Client(
     workers=50,
     in_memory=True
 )
+
 
 # ─── SCHEDULER ────────────────────────────────────────────────────────
 scheduler = AsyncIOScheduler()
@@ -61,25 +67,26 @@ async def check_premium_expiry():
             try:
                 await app.send_message(
                     user["user_id"],
-                    "😬 Premium expire ho gaya.\nFree mode active hai.\n"
+                    "😬 Premium expire ho gaya.\n"
+                    "Free mode active hai.\n"
                     "Dobara premium lega to seedha files milengi 😎"
                 )
-            except:
+            except Exception:
                 pass
 
 
-# ─── REGISTER HANDLERS ────────────────────────────────────────────────
-def register_all():
+# ─── REGISTER ALL HANDLERS ────────────────────────────────────────────
+def register_all_handlers():
     register_link_handler(app, db, users_col)
     register_stats_handlers(app, db, users_col)
     register_user_list_handlers(app, users_col)
     register_request_handler(app, users_col)
 
 
-# ─── STARTUP ──────────────────────────────────────────────────────────
+# ─── MAIN ENTRY ───────────────────────────────────────────────────────
 async def main():
     await app.start()
-    register_all()
+    register_all_handlers()
 
     scheduler.add_job(check_premium_expiry, "interval", hours=24)
     scheduler.start()
@@ -97,7 +104,6 @@ async def main():
     await idle()
 
 
-from pyrogram.idle import idle
-
+# ─── SAFE START (PYTHON 3.12+ FIX) ────────────────────────────────────
 if __name__ == "__main__":
-    asyncio.get_event_loop().run_until_complete(main())
+    asyncio.run(main())
