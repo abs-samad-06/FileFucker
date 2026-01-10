@@ -1,34 +1,46 @@
 # bot/handlers/start.py
 
 from pyrogram import filters
-from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
-
-from bot.services.users import get_or_create_user
+from pyrogram.types import Message
+from datetime import datetime
 
 
 def register_start_handler(app, users_col):
 
     @app.on_message(filters.command("start") & filters.private)
-    async def start_cmd(client, message):
+    async def start_handler(client, message: Message):
         user = message.from_user
 
-        await get_or_create_user(users_col, user)
-
-        buttons = InlineKeyboardMarkup(
-            [
-                [InlineKeyboardButton("📂 Upload File", callback_data="upload")],
-                [InlineKeyboardButton("💎 Premium", callback_data="premium")],
-                [InlineKeyboardButton("📊 Profile", callback_data="profile")],
-            ]
+        # Save user if not exists
+        await users_col.update_one(
+            {"user_id": user.id},
+            {
+                "$setOnInsert": {
+                    "user_id": user.id,
+                    "name": user.first_name,
+                    "username": user.username,
+                    "joined_at": datetime.utcnow(),
+                    "is_premium": False,
+                    "premium_expiry": None
+                }
+            },
+            upsert=True
         )
 
         await message.reply_text(
-            text=(
-                "🔥 **Welcome to FileFucker Bot**\n\n"
-                "📦 Upload your file\n"
-                "🔗 Generate secure download links\n"
-                "💎 Premium users get direct access\n\n"
-                "Start by sending me a file 😈"
-            ),
-            reply_markup=buttons
+            f"""🔥 **Welcome {user.first_name}**
+
+Main hoon **FileFucker Bot** 😎  
+Files upload karo → main **download link** bana dunga.
+
+📌 Commands:
+• `/start` – Bot start
+• File bhejo – Link milega
+
+Premium loge to:
+⚡ Fast links  
+🚫 No limits  
+
+Ab file daal BC 😈
+"""
         )
