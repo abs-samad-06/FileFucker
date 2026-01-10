@@ -3,35 +3,12 @@
 import asyncio
 import logging
 
-from pyrogram import Client, filters
+from pyrogram import Client
 from pyrogram import idle
 from motor.motor_asyncio import AsyncIOMotorClient
-from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 from config import Config, validate_config
-
-# ─── SAFE SERVICE IMPORTS ─────────────────────────────────────────────
-try:
-    from bot.services.premium import is_expired
-except Exception:
-    def is_expired(_):
-        return False
-
-try:
-    from bot.services.logs import send_log, log_system_online
-except Exception:
-    async def send_log(*args, **kwargs):
-        pass
-
-    def log_system_online(*args, **kwargs):
-        return "System online"
-
-
-# Handlers
-from bot.handlers.link import register_link_handler
-from bot.handlers.stats import register_stats_handlers
-from bot.handlers.users import register_user_list_handlers
-from bot.handlers.request import register_request_handler
+from bot.handlers.start import register_start_handler
 
 
 # ─── LOGGING ───────────────────────────────────────────────────────────
@@ -63,73 +40,16 @@ app = Client(
 )
 
 
-# ─── SCHEDULER ────────────────────────────────────────────────────────
-scheduler = AsyncIOScheduler()
-
-
-# ─── BASIC START HANDLER (IMPORTANT BC) ───────────────────────────────
-@app.on_message(filters.command("start"))
-async def start_handler(_, message):
-    await message.reply_text(
-        "🔥 **FileFucker Online**\n\n"
-        "Bot zinda hai BC 😎\n"
-        "Files bhej, link le, kaam chalu kar."
-    )
-
-
-# ─── PREMIUM EXPIRY WATCHDOG ──────────────────────────────────────────
-async def check_premium_expiry():
-    async for user in users_col.find({"is_premium": True}):
-        if is_expired(user.get("premium_expiry")):
-            await users_col.update_one(
-                {"user_id": user["user_id"]},
-                {"$set": {"is_premium": False, "premium_expiry": None}}
-            )
-            try:
-                await app.send_message(
-                    user["user_id"],
-                    "😬 Premium expire ho gaya.\n"
-                    "Free mode active hai.\n"
-                    "Dobara premium lega to seedha files milengi 😎"
-                )
-            except Exception:
-                pass
-
-
-# ─── REGISTER ALL HANDLERS ────────────────────────────────────────────
-def register_all_handlers():
-    register_link_handler(app, db, users_col)
-    register_stats_handlers(app, db, users_col)
-    register_user_list_handlers(app, users_col)
-    register_request_handler(app, users_col)
-
-
-# ─── MAIN LOGIC ───────────────────────────────────────────────────────
+# ─── MAIN ─────────────────────────────────────────────────────────────
 async def main():
     await app.start()
-    register_all_handlers()
 
-    scheduler.add_job(check_premium_expiry, "interval", hours=24)
-    scheduler.start()
+    register_start_handler(app, users_col)
 
-    try:
-        me = await app.get_me()
-        await send_log(
-            app,
-            log_system_online(
-                bot_username=me.username,
-                version=Config.VERSION
-            )
-        )
-    except Exception:
-        pass
-
-    logger.info("🔥 FileFucker fully assembled & running")
+    logger.info("🔥 FileFucker started & ready")
     await idle()
 
 
-# ─── HEROKU SAFE BOOTSTRAP ────────────────────────────────────────────
+# ─── ENTRY POINT (HEROKU SAFE) ────────────────────────────────────────
 if __name__ == "__main__":
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    loop.run_until_complete(main())
+    asyncio.run(main())
