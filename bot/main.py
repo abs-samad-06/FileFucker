@@ -11,7 +11,7 @@ from config import Config, validate_config
 
 # ─── HANDLERS ─────────────────────────────────────────────────────────
 from bot.handlers.start import register_start_handler
-from bot.handlers.ping import register_ping_handler   # ✅ DEBUG LIFELINE
+from bot.handlers.ping import register_ping_handler   # 🔥 DEBUG LIFELINE
 from bot.handlers.file import register_file_handler
 from bot.handlers.genlink import register_genlink_handler
 from bot.handlers.link import register_link_handler
@@ -45,14 +45,14 @@ db = mongo["filefucker"]
 users_col = db["users"]
 
 
-# ─── BOT CLIENT ───────────────────────────────────────────────────────
+# ─── BOT CLIENT (FIXED) ───────────────────────────────────────────────
+# ❌ in_memory=True HATA DIYA (ye hi main gandu bug tha)
 app = Client(
     name="FileFucker",
     api_id=Config.API_ID,
     api_hash=Config.API_HASH,
     bot_token=Config.BOT_TOKEN,
-    workers=20,
-    in_memory=True
+    workers=20
 )
 
 
@@ -81,7 +81,7 @@ async def check_premium_expiry():
 
 # ─── REGISTER ALL HANDLERS ────────────────────────────────────────────
 def register_all_handlers():
-    # 🔥 BASIC LIFELINE (sabse pehle)
+    # 🔥 SABSE PEHLE LIFELINE
     register_ping_handler(app)
 
     # core user flow
@@ -89,7 +89,7 @@ def register_all_handlers():
     register_file_handler(app, db, users_col)
     register_genlink_handler(app, db, users_col)
 
-    # ⚠️ start payload / wait flow
+    # deep link / wait flow
     register_link_handler(app, db, users_col)
     register_wait_handler(app, db, users_col)
 
@@ -106,7 +106,6 @@ def register_all_handlers():
 # ─── MAIN ─────────────────────────────────────────────────────────────
 async def main():
     await app.start()
-
     register_all_handlers()
 
     scheduler.add_job(check_premium_expiry, "interval", hours=24)
@@ -121,10 +120,13 @@ async def main():
         )
     )
 
-    logger.info("🔥 FileFucker fully started & production ready")
+    logger.info("🔥 FileFucker fully started Aah Aah Aah")
     await idle()
 
+    # graceful shutdown
+    await app.stop()
 
-# ─── ENTRY POINT (HEROKU / VPS SAFE) ───────────────────────────────────
+
+# ─── ENTRY POINT ──────────────────────────────────────────────────────
 if __name__ == "__main__":
     asyncio.run(main())
