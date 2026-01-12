@@ -11,6 +11,7 @@ from config import Config, validate_config
 
 # ─── HANDLERS ─────────────────────────────────────────────────────────
 from bot.handlers.start import register_start_handler
+from bot.handlers.ping import register_ping_handler   # ✅ DEBUG LIFELINE
 from bot.handlers.file import register_file_handler
 from bot.handlers.genlink import register_genlink_handler
 from bot.handlers.link import register_link_handler
@@ -80,10 +81,15 @@ async def check_premium_expiry():
 
 # ─── REGISTER ALL HANDLERS ────────────────────────────────────────────
 def register_all_handlers():
+    # 🔥 BASIC LIFELINE (sabse pehle)
+    register_ping_handler(app)
+
     # core user flow
     register_start_handler(app, users_col)
     register_file_handler(app, db, users_col)
     register_genlink_handler(app, db, users_col)
+
+    # ⚠️ start payload / wait flow
     register_link_handler(app, db, users_col)
     register_wait_handler(app, db, users_col)
 
